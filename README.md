@@ -4,9 +4,9 @@ Phase 1 of the AI-powered Question Bank Platform. Ingests exam materials (books,
 
 ## Scope
 
-**In scope:** document upload, PDF extraction, semantic chunking, LLM metadata extraction, embeddings, hybrid search, IBPS-style MCQ generation (persisted).
+**In scope:** document upload, PDF extraction, semantic chunking, LLM metadata extraction, embeddings, hybrid search, IBPS-style MCQ generation (persisted), Next.js showcase UI (`web/`).
 
-**Out of scope:** AI agents, full test-paper assembly, auth, frontend.
+**Out of scope:** AI agents, full test-paper assembly, auth.
 
 ## Architecture
 
@@ -56,6 +56,21 @@ uvicorn app.main:app --reload
 ```
 
 API docs: http://localhost:8000/docs
+
+## Frontend showcase
+
+Next.js + Tailwind UI that talks to the API (rewrites `/api/v1/*` → FastAPI):
+
+```bash
+cd web
+cp .env.local.example .env.local   # optional; defaults to localhost:8000
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 — Overview, Exams, Documents (upload/process/chunks), Search, and Questions (generate + practice).
+
+Ensure the API is running on `:8000` first. CORS is enabled for `http://localhost:3000`.
 
 ## Document pipeline
 

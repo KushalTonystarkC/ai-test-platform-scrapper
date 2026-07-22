@@ -23,3 +23,10 @@ uploads/
 .vscode/
 *.swp
 .DS_Store
+
+# Next.js frontend
+web/node_modules/
+web/.next/
+web/out/
+web/.env.local
+web/.env*.local

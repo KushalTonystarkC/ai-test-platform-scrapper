@@ -52,6 +52,25 @@ class Settings(BaseSettings):
     hybrid_semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     search_default_limit: int = 10
 
+    # Comma-separated origins for the Next.js showcase UI
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> list[str]:
+        if value is None or value == "":
+            return ["http://localhost:3000", "http://127.0.0.1:3000"]
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
     @field_validator("hybrid_semantic_weight")
     @classmethod
     def weights_sum_to_one(cls, v: float, info) -> float:  # type: ignore[no-untyped-def]
