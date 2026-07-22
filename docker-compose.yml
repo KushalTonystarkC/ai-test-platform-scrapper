@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: question-bank-postgres
+    environment:
+      POSTGRES_USER: kushal
+      POSTGRES_PASSWORD: "0000"
+      POSTGRES_DB: question_bank
+    ports:
+      # Host 5433 → container 5432 (avoids clashing with a local Postgres 17 on 5432)
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kushal -d question_bank"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
