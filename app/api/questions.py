@@ -23,11 +23,12 @@ async def generate_questions(
     service: QuestionServiceDep,
     session: DbSession,
 ) -> GenerateQuestionResponse:
-    items, context_used = await service.generate(payload)
+    items, context_used, mode = await service.generate(payload)
     await session.commit()
     return GenerateQuestionResponse(
         exam_id=payload.exam_id,
         topic=payload.topic,
+        mode=mode,
         context_used=context_used,
         items=[QuestionRead.model_validate(q) for q in items],
     )

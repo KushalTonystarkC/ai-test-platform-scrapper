@@ -127,6 +127,58 @@ class DocumentChunkRepository:
         items = list((await self.session.execute(stmt)).scalars().all())
         return items, total
 
+    async def sample_for_exam(
+        self,
+        exam_id: uuid.UUID,
+        *,
+        document_id: uuid.UUID | None = None,
+        limit: int = 8,
+    ) -> list[DocumentChunk]:
+        """Diverse sample of chunks for whole-exam / syllabus generation.
+
+        Prefers spread across documents: take up to one early chunk per document,
+        then fill remaining slots with random chunks from the exam corpus.
+        """
+        if limit <= 0:
+            return []
+
+        base_filters = [Document.exam_id == exam_id]
+        if document_id is not None:
+            base_filters.append(Document.id == document_id)
+
+        # One representative chunk per document (lowest chunk_index)
+        per_doc_stmt = (
+            select(DocumentChunk)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(*base_filters)
+            .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
+            .distinct(DocumentChunk.document_id)
+            .limit(limit)
+        )
+        per_doc = list((await self.session.execute(per_doc_stmt)).scalars().all())
+        selected: list[DocumentChunk] = list(per_doc)
+        selected_ids = {c.id for c in selected}
+
+        if len(selected) >= limit:
+            return selected[:limit]
+
+        remaining = limit - len(selected)
+        fill_stmt = (
+            select(DocumentChunk)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(*base_filters)
+            .order_by(func.random())
+            .limit(remaining + len(selected_ids))
+        )
+        for chunk in (await self.session.execute(fill_stmt)).scalars().all():
+            if chunk.id in selected_ids:
+                continue
+            selected.append(chunk)
+            selected_ids.add(chunk.id)
+            if len(selected) >= limit:
+                break
+        return selected
+
     async def update_embedding_and_metadata(
         self,
         chunk: DocumentChunk,

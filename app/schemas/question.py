@@ -13,11 +13,20 @@ DifficultyLiteral = Literal["easy", "medium", "hard"]
 
 class GenerateQuestionRequest(BaseModel):
     exam_id: uuid.UUID
-    topic: str = Field(..., min_length=1, max_length=512)
+    # If omitted, sample diverse chunks across the exam (whole syllabus mode)
+    topic: str | None = Field(default=None, max_length=512)
     count: int = Field(default=1, ge=1, le=5)
     difficulty: DifficultyLiteral | None = None
     document_id: uuid.UUID | None = None
     subject: str | None = Field(default=None, max_length=255)
+
+    @field_validator("topic", mode="before")
+    @classmethod
+    def empty_topic_as_none(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 class GeneratedMCQ(BaseModel):
@@ -108,7 +117,8 @@ class QuestionRead(BaseModel):
 
 class GenerateQuestionResponse(BaseModel):
     exam_id: uuid.UUID
-    topic: str
+    topic: str | None = None
+    mode: Literal["topic", "full_syllabus"]
     context_used: int
     items: list[QuestionRead]
 

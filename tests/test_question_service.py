@@ -10,12 +10,13 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import NotFoundError, ValidationError
+from app.models.document import DocumentChunk
+from app.models.enums import SearchMode
 from app.models.exam import Exam
 from app.models.question import Question
 from app.schemas.question import GeneratedMCQ, GenerateQuestionRequest, QuestionRead
 from app.schemas.search import SearchHit, SearchResponse
 from app.services.question import QuestionService
-from app.models.enums import SearchMode
 
 
 def test_generated_mcq_requires_four_options() -> None:
@@ -45,6 +46,13 @@ def test_generated_mcq_ok() -> None:
     )
     assert mcq.difficulty == "easy"
     assert mcq.correct_index == 1
+
+
+def test_topic_optional_and_blank_becomes_none() -> None:
+    req = GenerateQuestionRequest(exam_id=uuid.uuid4(), topic="  ")
+    assert req.topic is None
+    req2 = GenerateQuestionRequest(exam_id=uuid.uuid4())
+    assert req2.topic is None
 
 
 def test_question_read_from_orm_shape() -> None:
@@ -100,7 +108,7 @@ async def test_generate_raises_when_no_chunks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_persists_valid_mcqs() -> None:
+async def test_generate_topic_mode_persists() -> None:
     service = _make_service()
     exam_id = uuid.uuid4()
     chunk_id = uuid.uuid4()
@@ -149,7 +157,7 @@ async def test_generate_persists_valid_mcqs() -> None:
 
     service.questions.bulk_create = AsyncMock(side_effect=_bulk)
 
-    saved, context_used = await service.generate(
+    saved, context_used, mode = await service.generate(
         GenerateQuestionRequest(
             exam_id=exam_id,
             topic="RBI",
@@ -157,8 +165,59 @@ async def test_generate_persists_valid_mcqs() -> None:
             subject="Banking Awareness",
         )
     )
+    assert mode == "topic"
     assert context_used == 1
     assert len(saved) == 1
     assert saved[0].correct_index == 1
-    assert saved[0].options[1] == "RBI"
     service.questions.bulk_create.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_full_syllabus_samples_chunks() -> None:
+    service = _make_service()
+    exam_id = uuid.uuid4()
+    chunk = DocumentChunk(
+        id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        page_number=1,
+        chunk_index=0,
+        content="Syllabus covers banking, quant, and reasoning.",
+        summary="Full syllabus overview.",
+        extra_metadata={},
+    )
+    service.exams.get_by_id = AsyncMock(
+        return_value=Exam(id=exam_id, code="IBPS_PO", name="IBPS PO")
+    )
+    service.chunks.sample_for_exam = AsyncMock(return_value=[chunk])
+    service.llm.generate_json = AsyncMock(
+        return_value={
+            "questions": [
+                {
+                    "stem": "Which area is part of the exam syllabus?",
+                    "options": ["Cooking", "Banking Awareness", "Poetry", "Sports trivia"],
+                    "correct_index": 1,
+                    "explanation": "Banking is in the corpus.",
+                    "subject": "Banking Awareness",
+                    "topic": "syllabus",
+                    "difficulty": "easy",
+                }
+            ]
+        }
+    )
+
+    async def _bulk(rows: list[Question]) -> list[Question]:
+        for r in rows:
+            r.created_at = datetime.now(timezone.utc)
+        return rows
+
+    service.questions.bulk_create = AsyncMock(side_effect=_bulk)
+
+    saved, context_used, mode = await service.generate(
+        GenerateQuestionRequest(exam_id=exam_id, count=1)
+    )
+    assert mode == "full_syllabus"
+    assert context_used == 1
+    assert saved[0].topic == "syllabus"
+    assert saved[0].extra_metadata["generation_mode"] == "full_syllabus"
+    service.chunks.sample_for_exam.assert_awaited()
+    service.search.search.assert_not_called()

@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ProviderError, ValidationError
 from app.core.logging import get_logger
+from app.models.document import DocumentChunk
 from app.models.enums import SearchMode
 from app.models.question import Question
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.prompts import QUESTION_EXAMPLE_JSON, QUESTION_SYSTEM_PROMPT
+from app.repositories.document import DocumentChunkRepository
 from app.repositories.exam import ExamRepository
 from app.repositories.question import QuestionRepository
 from app.schemas.question import GeneratedMCQ, GenerateQuestionRequest
@@ -22,8 +24,12 @@ from app.search.service import SearchService
 logger = get_logger(__name__)
 
 _CONTEXT_CHUNK_CHARS = 800
-_CONTEXT_MAX_CHUNKS = 5
+_TOPIC_CONTEXT_CHUNKS = 5
+_SYLLABUS_CONTEXT_CHUNKS = 8
 _QUESTION_MAX_TOKENS = 900
+_FULL_SYLLABUS_TOPIC = "full_syllabus"
+
+GenerationMode = Literal["topic", "full_syllabus"]
 
 
 class QuestionService:
@@ -39,31 +45,34 @@ class QuestionService:
         self.search = search
         self.exams = ExamRepository(session)
         self.questions = QuestionRepository(session)
+        self.chunks = DocumentChunkRepository(session)
 
-    async def generate(self, request: GenerateQuestionRequest) -> tuple[list[Question], int]:
+    async def generate(
+        self, request: GenerateQuestionRequest
+    ) -> tuple[list[Question], int, GenerationMode]:
         exam = await self.exams.get_by_id(request.exam_id)
         if not exam:
             raise NotFoundError(f"Exam {request.exam_id} not found")
 
-        search_resp = await self.search.search(
-            SearchQuery(
-                q=request.topic,
-                mode=SearchMode.HYBRID,
-                exam_id=request.exam_id,
-                document_id=request.document_id,
-                limit=_CONTEXT_MAX_CHUNKS,
-            )
-        )
-        if not search_resp.items:
+        mode: GenerationMode = "topic" if request.topic else "full_syllabus"
+        hits = await self._resolve_context(request, mode=mode)
+        if not hits:
             raise ValidationError(
-                "No knowledge-base chunks found for this exam/topic. "
+                "No knowledge-base chunks found for this exam. "
                 "Upload and process documents first."
             )
 
-        context = self._build_context(search_resp.items)
-        chunk_ids = [hit.chunk_id for hit in search_resp.items]
-        raw = await self._call_llm(request, exam_code=exam.code, context=context)
-        parsed = self._parse_mcqs(raw, request=request)
+        context = self._build_context(hits)
+        chunk_ids = [hit.chunk_id for hit in hits]
+        default_topic = request.topic or _FULL_SYLLABUS_TOPIC
+        raw = await self._call_llm(
+            request,
+            exam_code=exam.code,
+            context=context,
+            mode=mode,
+            default_topic=default_topic,
+        )
+        parsed = self._parse_mcqs(raw, request=request, default_topic=default_topic)
         if not parsed:
             raise ProviderError("LLM produced no valid MCQs")
 
@@ -79,11 +88,11 @@ class QuestionService:
                     correct_index=mcq.correct_index,
                     explanation=mcq.explanation,
                     subject=mcq.subject or (request.subject or ""),
-                    topic=mcq.topic or request.topic,
+                    topic=mcq.topic or default_topic,
                     difficulty=mcq.difficulty,
                     source_chunk_ids=[str(cid) for cid in chunk_ids],
                     document_id=request.document_id,
-                    extra_metadata={"exam_code": exam.code},
+                    extra_metadata={"exam_code": exam.code, "generation_mode": mode},
                 )
             )
 
@@ -91,11 +100,12 @@ class QuestionService:
         logger.info(
             "questions_generated",
             exam_id=str(request.exam_id),
-            topic=request.topic,
+            topic=default_topic,
+            mode=mode,
             count=len(saved),
             context_used=len(chunk_ids),
         )
-        return saved, len(chunk_ids)
+        return saved, len(chunk_ids), mode
 
     async def get(self, question_id: uuid.UUID) -> Question:
         question = await self.questions.get_by_id(question_id)
@@ -120,6 +130,45 @@ class QuestionService:
             offset=offset,
         )
 
+    async def _resolve_context(
+        self,
+        request: GenerateQuestionRequest,
+        *,
+        mode: GenerationMode,
+    ) -> list[SearchHit]:
+        if mode == "topic":
+            assert request.topic is not None
+            search_resp = await self.search.search(
+                SearchQuery(
+                    q=request.topic,
+                    mode=SearchMode.HYBRID,
+                    exam_id=request.exam_id,
+                    document_id=request.document_id,
+                    limit=_TOPIC_CONTEXT_CHUNKS,
+                )
+            )
+            return search_resp.items
+
+        chunks = await self.chunks.sample_for_exam(
+            request.exam_id,
+            document_id=request.document_id,
+            limit=_SYLLABUS_CONTEXT_CHUNKS,
+        )
+        return [self._chunk_to_hit(c) for c in chunks]
+
+    @staticmethod
+    def _chunk_to_hit(chunk: DocumentChunk) -> SearchHit:
+        return SearchHit(
+            chunk_id=chunk.id,
+            document_id=chunk.document_id,
+            page_number=chunk.page_number,
+            chunk_index=chunk.chunk_index,
+            content=chunk.content,
+            summary=chunk.summary,
+            metadata=chunk.extra_metadata or {},
+            score=0.0,
+        )
+
     def _build_context(self, hits: list[SearchHit]) -> str:
         parts: list[str] = []
         for i, hit in enumerate(hits, start=1):
@@ -134,12 +183,21 @@ class QuestionService:
         *,
         exam_code: str,
         context: str,
+        mode: GenerationMode,
+        default_topic: str,
     ) -> dict[str, Any]:
         hints = [
             f"Exam: {exam_code}",
-            f"Topic: {request.topic}",
+            f"Mode: {mode}",
             f"Count: {request.count}",
         ]
+        if mode == "topic":
+            hints.append(f"Topic: {request.topic}")
+        else:
+            hints.append(
+                "Cover diverse areas from the full exam corpus/syllabus "
+                "(vary subjects/topics across questions)."
+            )
         if request.subject:
             hints.append(f"Subject: {request.subject}")
         if request.difficulty:
@@ -147,9 +205,9 @@ class QuestionService:
         user_prompt = (
             f"{' | '.join(hints)}\n\n"
             f"Context excerpts:\n{context}\n\n"
-            f"Generate {request.count} MCQ(s) as JSON."
+            f"Generate {request.count} MCQ(s) as JSON. "
+            f"Set each item's topic field meaningfully (default hint: {default_topic})."
         )
-        # OpenAI/Ollama provider accepts max_tokens; base interface includes it
         return await self.llm.generate_json(
             user_prompt,
             system=QUESTION_SYSTEM_PROMPT,
@@ -162,6 +220,7 @@ class QuestionService:
         raw: dict[str, Any],
         *,
         request: GenerateQuestionRequest,
+        default_topic: str,
     ) -> list[GeneratedMCQ]:
         items_raw: list[Any]
         if isinstance(raw.get("questions"), list):
@@ -180,7 +239,7 @@ class QuestionService:
             if request.subject and not item.get("subject"):
                 item = {**item, "subject": request.subject}
             if not item.get("topic"):
-                item = {**item, "topic": request.topic}
+                item = {**item, "topic": default_topic}
             try:
                 valid.append(GeneratedMCQ.model_validate(item))
             except Exception as exc:

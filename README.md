@@ -134,10 +134,20 @@ Interfaces live under `app/providers/`. Swap implementations without touching se
 
 After documents are processed:
 
+**Topic mode** (hybrid search for that topic):
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/questions/generate \
   -H 'Content-Type: application/json' \
   -d '{"exam_id":"<EXAM_UUID>","topic":"RBI monetary policy","count":2,"difficulty":"medium"}'
+```
+
+**Whole syllabus mode** (omit `topic` — samples diverse chunks across the exam):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/questions/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"exam_id":"<EXAM_UUID>","count":3}'
 ```
 
 ## Tests

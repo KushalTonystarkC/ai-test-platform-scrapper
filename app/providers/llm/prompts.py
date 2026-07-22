@@ -23,7 +23,8 @@ QUESTION_SYSTEM_PROMPT = """You write IBPS-style competitive exam MCQs from stud
 Return ONE JSON object with key "questions" (array).
 Each item: stem (string), options (exactly 4 non-empty strings), correct_index (0-3),
 explanation (short), subject, topic, difficulty (easy|medium|hard).
-Ground answers ONLY in the provided context. No markdown. No prose outside JSON."""
+Ground answers ONLY in the provided context. When Mode is full_syllabus, vary topics/subjects.
+No markdown. No prose outside JSON."""
 
 QUESTION_EXAMPLE_JSON = {
     "questions": [
