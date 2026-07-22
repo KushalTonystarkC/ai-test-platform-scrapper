@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     llm_model: str = "llama3.2"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 2048
+    # HTTP timeout for LLM calls (local CPU models often need 300+)
+    llm_timeout_seconds: float = Field(default=300.0, ge=30.0, le=1800.0)
 
     chunk_min_words: int = 500
     chunk_max_words: int = 800

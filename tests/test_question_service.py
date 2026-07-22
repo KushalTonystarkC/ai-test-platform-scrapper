@@ -48,6 +48,54 @@ def test_generated_mcq_ok() -> None:
     assert mcq.correct_index == 1
 
 
+def test_generated_mcq_normalizes_word_token_options() -> None:
+    words = (
+        "Regulates banks and monetary policy in India and also handles "
+        "currency issuance and foreign exchange management under statute"
+    ).split()
+    assert len(words) > 4
+    mcq = GeneratedMCQ(
+        stem="What does RBI do?",
+        options=words,
+        correct_index=0,
+    )
+    assert len(mcq.options) == 4
+    assert all(mcq.options)
+
+
+def test_generated_mcq_parses_letter_correct_index() -> None:
+    mcq = GeneratedMCQ(
+        stem="Q?",
+        options=["A1", "B1", "C1", "D1"],
+        correct_index="B",  # type: ignore[arg-type]
+    )
+    assert mcq.correct_index == 1
+
+
+def test_generated_mcq_defaults_missing_correct_index() -> None:
+    mcq = GeneratedMCQ.model_validate(
+        {
+            "stem": "Required probability concept?",
+            "options": ["Mean", "Variance", "Mode", "Range"],
+            "topic": "full_syllabus",
+            "subject": "Quant",
+        }
+    )
+    assert mcq.correct_index == 0
+    assert mcq.stem.startswith("Required")
+
+
+def test_generated_mcq_maps_answer_letter() -> None:
+    mcq = GeneratedMCQ.model_validate(
+        {
+            "stem": "Q?",
+            "options": ["A1", "B1", "C1", "D1"],
+            "answer": "C",
+        }
+    )
+    assert mcq.correct_index == 2
+
+
 def test_topic_optional_and_blank_becomes_none() -> None:
     req = GenerateQuestionRequest(exam_id=uuid.uuid4(), topic="  ")
     assert req.topic is None

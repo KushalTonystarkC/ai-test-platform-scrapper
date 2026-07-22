@@ -29,6 +29,8 @@ async def generate_questions(
         exam_id=payload.exam_id,
         topic=payload.topic,
         mode=mode,
+        requested_count=payload.count,
+        generated_count=len(items),
         context_used=context_used,
         items=[QuestionRead.model_validate(q) for q in items],
     )

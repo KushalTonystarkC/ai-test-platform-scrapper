@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 # Local CPU inference is slow — keep prompts tiny and generation short
 _METADATA_INPUT_CHARS = 1200
 _METADATA_MAX_TOKENS = 400
-_LOCAL_HTTP_TIMEOUT = 180.0
+_LOCAL_HTTP_TIMEOUT = 300.0
 _REMOTE_HTTP_TIMEOUT = 120.0
 
 
@@ -47,7 +47,8 @@ class OpenAILLMProvider(LLMProvider):
         self._model = settings.llm_model
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_max_tokens
-        self._timeout = _LOCAL_HTTP_TIMEOUT if self._local else _REMOTE_HTTP_TIMEOUT
+        configured = float(settings.llm_timeout_seconds)
+        self._timeout = configured if self._local else min(configured, _REMOTE_HTTP_TIMEOUT)
 
     async def _chat(
         self,

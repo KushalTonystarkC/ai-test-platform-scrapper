@@ -147,8 +147,10 @@ curl -X POST http://localhost:8000/api/v1/questions/generate \
 ```bash
 curl -X POST http://localhost:8000/api/v1/questions/generate \
   -H 'Content-Type: application/json' \
-  -d '{"exam_id":"<EXAM_UUID>","count":3}'
+  -d '{"exam_id":"<EXAM_UUID>","count":5}'
 ```
+
+`count` defaults to **1** (max **10**). Response includes `requested_count` and `generated_count`.
 
 ## Tests
 

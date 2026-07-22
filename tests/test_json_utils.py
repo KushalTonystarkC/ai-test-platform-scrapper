@@ -44,3 +44,36 @@ def test_safe_parse_fenced_and_leading_prose() -> None:
 def test_safe_parse_empty_raises() -> None:
     with pytest.raises(Exception):
         safe_parse_json("")
+
+
+def test_safe_parse_truncated_mid_key() -> None:
+    raw = (
+        '{"questions": [{"stem": "What is the main objective of RBI\'s Payments Vision 2025?",'
+        ' "options": ["A", "B", "C", "D"], "correct_index": 2,'
+        ' "explanation": "Focus on delivery.", "subject": "Banking Awareness",'
+        ' "topic": "Payments Vision 2025", "diffic'
+    )
+    data = safe_parse_json(raw)
+    assert "questions" in data
+    assert data["questions"][0]["correct_index"] == 2
+    assert data["questions"][0]["topic"] == "Payments Vision 2025"
+
+
+def test_safe_parse_truncated_mid_value() -> None:
+    raw = '{"questions": [{"stem": "Q?", "options": ["A", "B", "C", "D"], "correct_index": 0, "explanation": "Becau'
+    data = safe_parse_json(raw)
+    assert data["questions"][0]["stem"] == "Q?"
+    assert data["questions"][0]["explanation"].startswith("Becau")
+
+
+def test_safe_parse_raw_newline_inside_string() -> None:
+    # LLM bug: unescaped newline / tab inside a JSON string value
+    raw = (
+        '{"questions":[{"stem":"What is RBI?\nChoose one",'
+        '"options":["A","B","C","D"],"correct_index":0,'
+        '"explanation":"Line1\tLine2","subject":"Banking",'
+        '"topic":"RBI","difficulty":"easy"}]}'
+    )
+    data = safe_parse_json(raw)
+    assert "RBI?" in data["questions"][0]["stem"]
+    assert data["questions"][0]["correct_index"] == 0

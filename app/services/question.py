@@ -23,11 +23,13 @@ from app.search.service import SearchService
 
 logger = get_logger(__name__)
 
-_CONTEXT_CHUNK_CHARS = 800
-_TOPIC_CONTEXT_CHUNKS = 5
-_SYLLABUS_CONTEXT_CHUNKS = 8
-_QUESTION_MAX_TOKENS = 900
+# Keep tiny for CPU Ollama — large prompts cause timeouts
+_CONTEXT_CHUNK_CHARS = 350
+_TOPIC_CONTEXT_CHUNKS = 3
+_SYLLABUS_CONTEXT_CHUNKS = 6
+_QUESTION_MAX_TOKENS = 450
 _FULL_SYLLABUS_TOPIC = "full_syllabus"
+_MAX_ATTEMPTS_PER_QUESTION = 3
 
 GenerationMode = Literal["topic", "full_syllabus"]
 
@@ -62,22 +64,58 @@ class QuestionService:
                 "Upload and process documents first."
             )
 
-        context = self._build_context(hits)
         chunk_ids = [hit.chunk_id for hit in hits]
         default_topic = request.topic or _FULL_SYLLABUS_TOPIC
-        raw = await self._call_llm(
-            request,
-            exam_code=exam.code,
-            context=context,
-            mode=mode,
-            default_topic=default_topic,
-        )
-        parsed = self._parse_mcqs(raw, request=request, default_topic=default_topic)
+
+        # One MCQ per slot with retries — local models often fail intermittently
+        parsed: list[GeneratedMCQ] = []
+        last_error: Exception | None = None
+        for i in range(request.count):
+            # Rotate context window so multi-question runs stay diverse
+            window = self._context_window(hits, i)
+            context = self._build_context(window)
+            mcq: GeneratedMCQ | None = None
+            for attempt in range(1, _MAX_ATTEMPTS_PER_QUESTION + 1):
+                try:
+                    raw = await self._call_llm(
+                        request,
+                        exam_code=exam.code,
+                        context=context,
+                        mode=mode,
+                        default_topic=default_topic,
+                        index=i + 1,
+                    )
+                    batch = self._parse_mcqs(
+                        raw, request=request, default_topic=default_topic
+                    )
+                    if batch:
+                        mcq = batch[0]
+                        break
+                    last_error = ProviderError("LLM produced no valid MCQ")
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "question_llm_attempt_failed",
+                        index=i + 1,
+                        attempt=attempt,
+                        error=str(exc),
+                    )
+            if mcq is not None:
+                parsed.append(mcq)
+            else:
+                logger.warning(
+                    "question_slot_exhausted",
+                    index=i + 1,
+                    error=str(last_error),
+                )
+
         if not parsed:
-            raise ProviderError("LLM produced no valid MCQs")
+            raise ProviderError(
+                f"LLM produced no valid MCQs: {last_error}"
+            ) from last_error
 
         rows: list[Question] = []
-        for mcq in parsed[: request.count]:
+        for mcq in parsed:
             rows.append(
                 Question(
                     id=uuid.uuid4(),
@@ -102,11 +140,19 @@ class QuestionService:
             exam_id=str(request.exam_id),
             topic=default_topic,
             mode=mode,
+            requested=request.count,
             count=len(saved),
             context_used=len(chunk_ids),
         )
         return saved, len(chunk_ids), mode
 
+    def _context_window(self, hits: list[SearchHit], index: int) -> list[SearchHit]:
+        """Pick a small rotating subset of hits for question #index."""
+        if len(hits) <= 2:
+            return hits
+        start = index % len(hits)
+        ordered = hits[start:] + hits[:start]
+        return ordered[:2]
     async def get(self, question_id: uuid.UUID) -> Question:
         question = await self.questions.get_by_id(question_id)
         if not question:
@@ -174,8 +220,8 @@ class QuestionService:
         for i, hit in enumerate(hits, start=1):
             body = (hit.summary or hit.content or "").strip()
             body = body[:_CONTEXT_CHUNK_CHARS]
-            parts.append(f"[Chunk {i} id={hit.chunk_id}]\n{body}")
-        return "\n\n".join(parts)
+            parts.append(f"[{i}] {body}")
+        return "\n".join(parts)
 
     async def _call_llm(
         self,
@@ -185,28 +231,21 @@ class QuestionService:
         context: str,
         mode: GenerationMode,
         default_topic: str,
+        index: int,
     ) -> dict[str, Any]:
-        hints = [
-            f"Exam: {exam_code}",
-            f"Mode: {mode}",
-            f"Count: {request.count}",
-        ]
+        hints = [f"Exam:{exam_code}", f"Mode:{mode}", f"Q#:{index}"]
         if mode == "topic":
-            hints.append(f"Topic: {request.topic}")
+            hints.append(f"Topic:{request.topic}")
         else:
-            hints.append(
-                "Cover diverse areas from the full exam corpus/syllabus "
-                "(vary subjects/topics across questions)."
-            )
+            hints.append("Cover a different syllabus area than prior questions.")
         if request.subject:
-            hints.append(f"Subject: {request.subject}")
+            hints.append(f"Subject:{request.subject}")
         if request.difficulty:
-            hints.append(f"Difficulty: {request.difficulty}")
+            hints.append(f"Difficulty:{request.difficulty}")
         user_prompt = (
-            f"{' | '.join(hints)}\n\n"
-            f"Context excerpts:\n{context}\n\n"
-            f"Generate {request.count} MCQ(s) as JSON. "
-            f"Set each item's topic field meaningfully (default hint: {default_topic})."
+            f"{' | '.join(hints)}\n"
+            f"Context:\n{context}\n"
+            f"Generate exactly 1 MCQ JSON. topic hint: {default_topic}"
         )
         return await self.llm.generate_json(
             user_prompt,
