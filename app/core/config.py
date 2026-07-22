@@ -26,15 +26,18 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     max_upload_size_mb: int = 50
 
-    embedding_provider: str = "gemini"
-    embedding_dimension: int = 1536
-    embedding_model: str = "gemini-embedding-001"
+    # Default: local open-source sentence-transformers (no API key)
+    embedding_provider: str = "sentence_transformers"
+    embedding_dimension: int = 384
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     gemini_api_key: str = ""
-    openai_api_key: str = ""
-    openai_base_url: str = "https://api.openai.com/v1"
+    # Used by OpenAI-compatible APIs (Ollama, Groq, OpenRouter, OpenAI)
+    openai_api_key: str = "ollama"
+    openai_base_url: str = "http://localhost:11434/v1"
 
-    llm_provider: str = "gemini"
-    llm_model: str = "gemini-2.5-flash"
+    # Default: Ollama via OpenAI-compatible chat API
+    llm_provider: str = "ollama"
+    llm_model: str = "llama3.2"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 2048
 

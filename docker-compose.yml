@@ -18,5 +18,18 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional local LLM (OpenAI-compatible on :11434). Pull a model after start:
+  #   docker compose --profile ollama exec ollama ollama pull llama3.2
+  ollama:
+    image: ollama/ollama:latest
+    container_name: question-bank-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - ollama
+
 volumes:
   pgdata:
+  ollama_data:

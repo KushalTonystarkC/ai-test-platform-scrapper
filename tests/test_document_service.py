@@ -132,7 +132,7 @@ async def test_upload_success(settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_mark_processing_blocks_processed(settings: Settings) -> None:
+async def test_mark_processing_allows_reprocess(settings: Settings) -> None:
     service = _make_service(settings)
     doc = Document(
         id=uuid.uuid4(),
@@ -146,5 +146,38 @@ async def test_mark_processing_blocks_processed(settings: Settings) -> None:
         file_size_bytes=1,
     )
     service.documents.get_by_id = AsyncMock(return_value=doc)
-    with pytest.raises(ValidationError):
+    service.documents.update_status = AsyncMock(
+        return_value=Document(
+            id=doc.id,
+            exam_id=doc.exam_id,
+            title=doc.title,
+            document_type=doc.document_type,
+            status=DocumentStatus.PROCESSING,
+            filename=doc.filename,
+            storage_path=doc.storage_path,
+            content_type=doc.content_type,
+            file_size_bytes=doc.file_size_bytes,
+        )
+    )
+    result = await service.mark_processing(doc.id)
+    assert result.status == DocumentStatus.PROCESSING
+    service.documents.update_status.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mark_processing_blocks_in_flight(settings: Settings) -> None:
+    service = _make_service(settings)
+    doc = Document(
+        id=uuid.uuid4(),
+        exam_id=uuid.uuid4(),
+        title="X",
+        document_type=DocumentType.BOOK,
+        status=DocumentStatus.PROCESSING,
+        filename="x.pdf",
+        storage_path="/tmp/x.pdf",
+        content_type="application/pdf",
+        file_size_bytes=1,
+    )
+    service.documents.get_by_id = AsyncMock(return_value=doc)
+    with pytest.raises(ValidationError, match="already processing"):
         await service.mark_processing(doc.id)

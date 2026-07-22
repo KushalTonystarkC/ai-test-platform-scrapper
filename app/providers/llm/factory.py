@@ -5,9 +5,7 @@ from __future__ import annotations
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ProviderError
 from app.providers.llm.base import LLMProvider
-from app.providers.llm.gemini_provider import GeminiLLMProvider
 from app.providers.llm.mock import MockLLMProvider
-from app.providers.llm.openai_provider import OpenAILLMProvider
 
 
 def create_llm_provider(settings: Settings | None = None) -> LLMProvider:
@@ -15,11 +13,15 @@ def create_llm_provider(settings: Settings | None = None) -> LLMProvider:
     name = settings.llm_provider.lower().strip()
     if name == "mock":
         return MockLLMProvider()
-    if name == "gemini":
-        return GeminiLLMProvider(settings)
-    if name == "openai":
+    if name in ("openai", "ollama"):
+        from app.providers.llm.openai_provider import OpenAILLMProvider
+
         return OpenAILLMProvider(settings)
+    if name == "gemini":
+        from app.providers.llm.gemini_provider import GeminiLLMProvider
+
+        return GeminiLLMProvider(settings)
     raise ProviderError(
         f"Unknown LLM provider: {name}",
-        details={"supported": ["mock", "gemini", "openai"]},
+        details={"supported": ["openai", "ollama", "mock", "gemini"]},
     )

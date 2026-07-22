@@ -12,15 +12,23 @@ from app.providers.embedding.base import EmbeddingProvider
 logger = get_logger(__name__)
 
 
+def _is_local_base_url(base_url: str) -> bool:
+    host = base_url.lower()
+    return any(
+        token in host
+        for token in ("localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal")
+    )
+
+
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, settings: Settings) -> None:
-        if not settings.openai_api_key:
-            raise ProviderError(
-                "OPENAI_API_KEY is required for OpenAI embedding provider",
-                details={"provider": "openai"},
-            )
-        self._api_key = settings.openai_api_key
         self._base_url = settings.openai_base_url.rstrip("/")
+        self._api_key = settings.openai_api_key or "ollama"
+        if not settings.openai_api_key and not _is_local_base_url(self._base_url):
+            raise ProviderError(
+                "OPENAI_API_KEY is required for remote OpenAI-compatible embedding providers",
+                details={"provider": "openai", "base_url": self._base_url},
+            )
         self._model = settings.embedding_model
         self._dimension = settings.embedding_dimension
 

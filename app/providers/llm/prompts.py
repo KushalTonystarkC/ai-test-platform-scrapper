@@ -1,13 +1,20 @@
 """Shared LLM prompts."""
 
-METADATA_SYSTEM_PROMPT = """You are an expert educational content analyst for competitive exams in India.
-Given a text chunk from study material, extract structured metadata.
-Keep the response compact.
-Rules:
-- subject, chapter, topic, summary, difficultyHint, sourceType MUST be strings (not arrays).
-- If multiple topics apply, put the primary one in topic and the rest in subtopics.
-- subtopics, keywords, concepts, learningObjectives MUST be arrays of strings.
-- summary: max 40 words.
-- keywords/concepts/subtopics: max 8 items each.
-- difficultyHint: one of easy, medium, hard.
-No markdown fences. No commentary."""
+METADATA_SYSTEM_PROMPT = """Extract exam-study metadata as ONE JSON object.
+Keys: subject, chapter, topic (strings), subtopics/keywords/concepts/learningObjectives (string arrays),
+summary (≤40 words), difficultyHint (easy|medium|hard), sourceType (string).
+Max 5 items per array. No markdown. No prose outside JSON."""
+
+# Compact example — do NOT use full JSON Schema (bloated prompts kill local CPU models)
+METADATA_EXAMPLE_JSON = {
+    "subject": "Banking Awareness",
+    "chapter": "",
+    "topic": "RBI",
+    "subtopics": ["monetary policy"],
+    "keywords": ["RBI", "banks"],
+    "concepts": ["regulation"],
+    "learningObjectives": [],
+    "summary": "RBI regulates banks and monetary policy in India.",
+    "difficultyHint": "easy",
+    "sourceType": "BOOK",
+}

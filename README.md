@@ -33,20 +33,25 @@ app/
 # 1. Start PostgreSQL (pgvector + pg_trgm)
 docker compose up -d
 
-# 2. Install
+# 2. Install (includes local sentence-transformers embeddings)
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,sentence-transformers]"
 
 # 3. Configure
 cp .env.example .env
 
-# 4. Migrate
+# 4. Start Ollama in Docker and pull an LLM (free, local)
+docker compose --profile ollama up -d
+docker compose --profile ollama exec ollama ollama pull llama3.2
+# (Host `ollama` CLI is not required when using the container.)
+
+# 5. Migrate
 alembic upgrade head
 
-# 5. Seed exams
+# 6. Seed exams
 python -m scripts.seed_exams
 
-# 6. Run API
+# 7. Run API
 uvicorn app.main:app --reload
 ```
 
@@ -72,26 +77,40 @@ Upload PDF → Store file → DB record (UPLOADED)
 
 ## Providers
 
-Defaults use **Gemini**. Set `GEMINI_API_KEY` in `.env`.
+Defaults use **free local open-source models** — no Gemini/OpenAI API keys required.
 
-| Provider | Values | Default models |
-|----------|--------|----------------|
-| LLM | `gemini`, `mock`, `openai` | `gemini-2.5-flash` |
-| Embedding | `gemini`, `mock`, `openai` | `gemini-embedding-001` (dim 1536) |
+| Role | Provider | Default model |
+|------|----------|---------------|
+| Embedding | `sentence_transformers` | `BAAI/bge-small-en-v1.5` (dim 384) |
+| LLM | `ollama` (OpenAI-compatible) | `llama3.2` via `http://localhost:11434/v1` |
 
-Interfaces live under `app/providers/`. Swap implementations without touching services.
+Also supported: `mock`, `openai` (any OpenAI-compatible host), `gemini` (optional extra).
 
 ```bash
-# Gemini (default)
-LLM_PROVIDER=gemini
-EMBEDDING_PROVIDER=gemini
-GEMINI_API_KEY=your-key
+# Local open-source (default)
+EMBEDDING_PROVIDER=sentence_transformers
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+EMBEDDING_DIMENSION=384
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.2
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
 
-# Local/tests without API calls
+# Tests / offline without models
 LLM_PROVIDER=mock
 EMBEDDING_PROVIDER=mock
+
+# Optional Gemini (pip install -e ".[gemini]")
+LLM_PROVIDER=gemini
+EMBEDDING_PROVIDER=gemini
+EMBEDDING_MODEL=gemini-embedding-001
+EMBEDDING_DIMENSION=1536
+GEMINI_API_KEY=your-key
 ```
 
+If you change `EMBEDDING_DIMENSION`, update the Alembic vector column (or add a migration) and re-process documents.
+
+Interfaces live under `app/providers/`. Swap implementations without touching services.
 ## Task backends
 
 `TASK_BACKEND=in_memory` (default) runs processing via FastAPI `BackgroundTasks`. Replace with Celery/Dramatiq by implementing `TaskDispatcher` — services stay unchanged.

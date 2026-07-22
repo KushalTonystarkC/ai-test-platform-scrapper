@@ -136,11 +136,11 @@ class DocumentService:
 
     async def mark_processing(self, document_id: uuid.UUID) -> Document:
         document = await self.get(document_id)
-        if document.status == DocumentStatus.PROCESSED:
+        if document.status == DocumentStatus.PROCESSING:
             raise ValidationError(
-                "Document already processed; re-processing not enabled in Phase 1"
+                "Document is already processing; wait for it to finish or fail"
             )
-        # Allow retry from UPLOADED, FAILED, or stuck PROCESSING
+        # Re-process allowed: process_document deletes prior chunks first
         return await self.documents.update_status(document, DocumentStatus.PROCESSING)
 
     async def process_document(self, document_id: uuid.UUID) -> Document:
