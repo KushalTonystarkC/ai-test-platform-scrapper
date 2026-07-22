@@ -18,3 +18,28 @@ METADATA_EXAMPLE_JSON = {
     "difficultyHint": "easy",
     "sourceType": "BOOK",
 }
+
+QUESTION_SYSTEM_PROMPT = """You write IBPS-style competitive exam MCQs from study excerpts.
+Return ONE JSON object with key "questions" (array).
+Each item: stem (string), options (exactly 4 non-empty strings), correct_index (0-3),
+explanation (short), subject, topic, difficulty (easy|medium|hard).
+Ground answers ONLY in the provided context. No markdown. No prose outside JSON."""
+
+QUESTION_EXAMPLE_JSON = {
+    "questions": [
+        {
+            "stem": "Which institution regulates banks in India?",
+            "options": [
+                "SEBI",
+                "RBI",
+                "IRDAI",
+                "NABARD",
+            ],
+            "correct_index": 1,
+            "explanation": "The Reserve Bank of India is the banking regulator.",
+            "subject": "Banking Awareness",
+            "topic": "RBI",
+            "difficulty": "easy",
+        }
+    ]
+}

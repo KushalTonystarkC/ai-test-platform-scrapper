@@ -23,8 +23,23 @@ class MockLLMProvider(LLMProvider):
         *,
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         digest = hashlib.sha256(prompt.encode()).hexdigest()[:12]
+        if schema_hint and "questions" in schema_hint:
+            return {
+                "questions": [
+                    {
+                        "stem": "Which body regulates commercial banks in India?",
+                        "options": ["SEBI", "RBI", "IRDAI", "PFRDA"],
+                        "correct_index": 1,
+                        "explanation": "RBI is the banking regulator.",
+                        "subject": "Banking Awareness",
+                        "topic": "RBI",
+                        "difficulty": "easy",
+                    }
+                ]
+            }
         return {"mock": True, "digest": digest, "prompt_length": len(prompt)}
 
     async def summarize(self, text: str, *, max_words: int = 100) -> str:

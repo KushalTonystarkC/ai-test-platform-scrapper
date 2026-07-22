@@ -8,6 +8,13 @@ from app.schemas.document import (
     DocumentUploadMeta,
 )
 from app.schemas.exam import ExamCreate, ExamRead, ExamUpdate, SubjectCreate, SubjectRead
+from app.schemas.question import (
+    GenerateQuestionRequest,
+    GenerateQuestionResponse,
+    GeneratedMCQ,
+    QuestionListResponse,
+    QuestionRead,
+)
 from app.schemas.search import SearchHit, SearchQuery, SearchResponse
 
 __all__ = [
@@ -21,6 +28,11 @@ __all__ = [
     "ExamCreate",
     "ExamRead",
     "ExamUpdate",
+    "GenerateQuestionRequest",
+    "GenerateQuestionResponse",
+    "GeneratedMCQ",
+    "QuestionListResponse",
+    "QuestionRead",
     "SearchHit",
     "SearchQuery",
     "SearchResponse",

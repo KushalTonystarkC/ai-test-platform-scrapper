@@ -4,9 +4,9 @@ Phase 1 of the AI-powered Question Bank Platform. Ingests exam materials (books,
 
 ## Scope
 
-**In scope:** document upload, PDF extraction, semantic chunking, LLM metadata extraction, embeddings, hybrid search.
+**In scope:** document upload, PDF extraction, semantic chunking, LLM metadata extraction, embeddings, hybrid search, IBPS-style MCQ generation (persisted).
 
-**Out of scope:** question generation, AI agents, test generation, auth, frontend.
+**Out of scope:** AI agents, full test-paper assembly, auth, frontend.
 
 ## Architecture
 
@@ -125,7 +125,20 @@ Interfaces live under `app/providers/`. Swap implementations without touching se
 | GET | `/api/v1/documents/{id}` | Document detail |
 | GET | `/api/v1/documents/{id}/chunks` | Chunks for a document |
 | GET | `/api/v1/search` | Hybrid / keyword / semantic search |
+| POST | `/api/v1/questions/generate` | Generate & save MCQs from KB |
+| GET | `/api/v1/questions` | List saved questions |
+| GET | `/api/v1/questions/{id}` | Get one question |
 | GET/POST | `/api/v1/exams` | List / create exams |
+
+### Generate MCQs
+
+After documents are processed:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/questions/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"exam_id":"<EXAM_UUID>","topic":"RBI monetary policy","count":2,"difficulty":"medium"}'
+```
 
 ## Tests
 

@@ -19,6 +19,7 @@ from app.providers.pdf.pypdf_extractor import PyPDFExtractor
 from app.search.service import SearchService
 from app.services.document import DocumentService
 from app.services.exam import ExamService
+from app.services.question import QuestionService
 from app.utils.storage import LocalFileStorage
 from app.workers.tasks import (
     InMemoryTaskDispatcher,
@@ -55,6 +56,13 @@ class AppContainer:
 
     def build_search_service(self, session: AsyncSession) -> SearchService:
         return SearchService(session, self.embeddings, self.settings)
+
+    def build_question_service(self, session: AsyncSession) -> QuestionService:
+        return QuestionService(
+            session,
+            llm=self.llm,
+            search=self.build_search_service(session),
+        )
 
 
 _container: AppContainer | None = None
@@ -103,6 +111,10 @@ async def get_search_service(session: DbSession) -> SearchService:
     return get_container().build_search_service(session)
 
 
+async def get_question_service(session: DbSession) -> QuestionService:
+    return get_container().build_question_service(session)
+
+
 def get_task_dispatcher() -> TaskDispatcher:
     return get_container().task_dispatcher
 
@@ -110,5 +122,6 @@ def get_task_dispatcher() -> TaskDispatcher:
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ExamServiceDep = Annotated[ExamService, Depends(get_exam_service)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
+QuestionServiceDep = Annotated[QuestionService, Depends(get_question_service)]
 TaskDispatcherDep = Annotated[TaskDispatcher, Depends(get_task_dispatcher)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]

@@ -79,6 +79,7 @@ class GeminiLLMProvider(LLMProvider):
         *,
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         if schema_hint:
             prompt = f"{prompt}\n\nExpected JSON schema:\n{json.dumps(schema_hint)}"
@@ -86,7 +87,8 @@ class GeminiLLMProvider(LLMProvider):
             prompt,
             system=system,
             json_mode=True,
-            max_output_tokens=max(self._max_tokens, _METADATA_MAX_OUTPUT_TOKENS),
+            max_output_tokens=max_tokens
+            or max(self._max_tokens, _METADATA_MAX_OUTPUT_TOKENS),
         )
         try:
             return safe_parse_json(raw)

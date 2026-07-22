@@ -18,9 +18,10 @@ class LLMProvider(ABC):
         *,
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Generate a JSON object from the given prompt. Returns parsed dict."""
-
+        ...
     @abstractmethod
     async def summarize(self, text: str, *, max_words: int = 100) -> str:
         """Produce a concise summary of the given text."""

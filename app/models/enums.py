@@ -20,3 +20,9 @@ class SearchMode(StrEnum):
     KEYWORD = "keyword"
     SEMANTIC = "semantic"
     HYBRID = "hybrid"
+
+
+class DifficultyHint(StrEnum):
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
