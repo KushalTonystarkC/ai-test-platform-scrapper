@@ -198,12 +198,11 @@ async def test_generate_topic_mode_persists() -> None:
         }
     )
 
-    async def _bulk(rows: list[Question]) -> list[Question]:
-        for r in rows:
-            r.created_at = datetime.now(timezone.utc)
-        return rows
+    async def _create(row: Question) -> Question:
+        row.created_at = datetime.now(timezone.utc)
+        return row
 
-    service.questions.bulk_create = AsyncMock(side_effect=_bulk)
+    service.questions.create = AsyncMock(side_effect=_create)
 
     saved, context_used, mode = await service.generate(
         GenerateQuestionRequest(
@@ -217,7 +216,7 @@ async def test_generate_topic_mode_persists() -> None:
     assert context_used == 1
     assert len(saved) == 1
     assert saved[0].correct_index == 1
-    service.questions.bulk_create.assert_awaited()
+    service.questions.create.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -253,12 +252,11 @@ async def test_generate_full_syllabus_samples_chunks() -> None:
         }
     )
 
-    async def _bulk(rows: list[Question]) -> list[Question]:
-        for r in rows:
-            r.created_at = datetime.now(timezone.utc)
-        return rows
+    async def _create(row: Question) -> Question:
+        row.created_at = datetime.now(timezone.utc)
+        return row
 
-    service.questions.bulk_create = AsyncMock(side_effect=_bulk)
+    service.questions.create = AsyncMock(side_effect=_create)
 
     saved, context_used, mode = await service.generate(
         GenerateQuestionRequest(exam_id=exam_id, count=1)
@@ -269,3 +267,48 @@ async def test_generate_full_syllabus_samples_chunks() -> None:
     assert saved[0].extra_metadata["generation_mode"] == "full_syllabus"
     service.chunks.sample_for_exam.assert_awaited()
     service.search.search.assert_not_called()
+
+
+def test_is_duplicate_stem_detects_paraphrase() -> None:
+    seen = {
+        QuestionService._normalize_stem(
+            "What is the primary function of RBI in India?"
+        )
+    }
+    assert QuestionService._is_duplicate_stem(
+        "What is the primary function of RBI in India?",
+        seen,
+    )
+    assert QuestionService._is_duplicate_stem(
+        "What is the primary function of the RBI in India?",
+        seen,
+    )
+    assert not QuestionService._is_duplicate_stem(
+        "Which body issues currency notes in India?",
+        seen,
+    )
+
+
+def test_parse_mcqs_accepts_flat_object() -> None:
+    service = _make_service()
+    parsed = service._parse_mcqs(
+        {
+            "stem": "Who regulates banks?",
+            "options": ["SEBI", "RBI", "IRDAI", "NABARD"],
+            "correct_index": 1,
+        },
+        request=GenerateQuestionRequest(exam_id=uuid.uuid4()),
+        default_topic="full_syllabus",
+    )
+    assert len(parsed) == 1
+    assert parsed[0].correct_index == 1
+
+
+def test_parse_mcqs_skips_incomplete_payload() -> None:
+    service = _make_service()
+    parsed = service._parse_mcqs(
+        {"topic": "full_syllabus", "correct_index": 0},
+        request=GenerateQuestionRequest(exam_id=uuid.uuid4()),
+        default_topic="full_syllabus",
+    )
+    assert parsed == []

@@ -56,13 +56,21 @@ class OpenAILLMProvider(LLMProvider):
         *,
         response_format: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> str:
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
-            "temperature": self._temperature,
+            "temperature": temperature if temperature is not None else self._temperature,
             "max_tokens": max_tokens if max_tokens is not None else self._max_tokens,
+            # Stream tokens so slow local models keep the HTTP connection alive
+            # and avoid long blocking waits on a single non-streaming response.
+            "stream": True,
         }
+        # Ollama / OpenAI honour `seed`; varying it per question avoids identical decodes.
+        if seed is not None:
+            payload["seed"] = seed
         # response_format slows / flakes on some Ollama builds — only use remotely
         if response_format and not self._local:
             payload["response_format"] = response_format
@@ -70,18 +78,20 @@ class OpenAILLMProvider(LLMProvider):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "Accept": "text/event-stream",
         }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{self._base_url}/chat/completions",
                     headers=headers,
                     json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"].get("content")
-                return (content or "").strip()
+                ) as resp:
+                    resp.raise_for_status()
+                    return (await self._consume_chat_stream(resp)).strip()
+        except ProviderError:
+            raise
         except httpx.TimeoutException as exc:
             logger.error(
                 "llm_timeout",
@@ -102,8 +112,39 @@ class OpenAILLMProvider(LLMProvider):
                 error=str(exc) or type(exc).__name__,
             )
             raise ProviderError(f"LLM request failed: {exc or type(exc).__name__}") from exc
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError(f"Unexpected LLM response shape: {exc}") from exc
+
+    @staticmethod
+    async def _consume_chat_stream(resp: httpx.Response) -> str:
+        """Accumulate OpenAI-compatible SSE (or NDJSON) chat completion chunks."""
+        parts: list[str] = []
+        async for line in resp.aiter_lines():
+            if not line:
+                continue
+            payload = line[6:].strip() if line.startswith("data:") else line.strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                data = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            choices = data.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0] or {}
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece is None:
+                # Some proxies emit the full message on the final chunk
+                message = choice.get("message") or {}
+                piece = message.get("content")
+            if piece:
+                parts.append(piece)
+        content = "".join(parts)
+        if not content:
+            raise ProviderError("LLM stream returned empty content")
+        return content
 
     async def generate_json(
         self,
@@ -112,6 +153,8 @@ class OpenAILLMProvider(LLMProvider):
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         messages: list[dict[str, str]] = []
         if system:
@@ -125,6 +168,8 @@ class OpenAILLMProvider(LLMProvider):
             messages,
             response_format=None if self._local else {"type": "json_object"},
             max_tokens=max_tokens,
+            temperature=temperature,
+            seed=seed,
         )
         if not raw:
             raise ProviderError("LLM returned empty content")

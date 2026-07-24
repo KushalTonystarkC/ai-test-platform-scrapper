@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.question import Question
@@ -31,6 +31,26 @@ class QuestionRepository:
 
     async def get_by_id(self, question_id: uuid.UUID) -> Question | None:
         return await self.session.get(Question, question_id)
+
+    async def delete_by_id(self, question_id: uuid.UUID) -> bool:
+        question = await self.get_by_id(question_id)
+        if not question:
+            return False
+        await self.session.delete(question)
+        await self.session.flush()
+        return True
+
+    async def delete_all(
+        self,
+        *,
+        exam_id: uuid.UUID | None = None,
+    ) -> int:
+        stmt = delete(Question)
+        if exam_id is not None:
+            stmt = stmt.where(Question.exam_id == exam_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return int(result.rowcount or 0)
 
     async def list(
         self,

@@ -19,8 +19,14 @@ class LLMProvider(ABC):
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
-        """Generate a JSON object from the given prompt. Returns parsed dict."""
+        """Generate a JSON object from the given prompt. Returns parsed dict.
+
+        ``temperature`` and ``seed`` override the provider defaults when set,
+        letting callers control decoding diversity per request.
+        """
         ...
     @abstractmethod
     async def summarize(self, text: str, *, max_words: int = 100) -> str:

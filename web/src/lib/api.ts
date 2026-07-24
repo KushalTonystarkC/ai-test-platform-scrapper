@@ -1,4 +1,5 @@
 import type {
+  ClearQuestionsResponse,
   Document,
   DocumentChunkListResponse,
   DocumentListResponse,
@@ -7,6 +8,7 @@ import type {
   Exam,
   GenerateQuestionRequest,
   GenerateQuestionResponse,
+  GenerateStreamEvent,
   HealthResponse,
   Question,
   QuestionListResponse,
@@ -15,19 +17,45 @@ import type {
 } from "./types";
 import { ApiError } from "./types";
 
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
+function parseSseChunk(chunk: string): GenerateStreamEvent | null {
+  const lines = chunk.split("\n");
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (!dataLines.length) return null;
+  try {
+    const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+    return { event, ...data } as GenerateStreamEvent;
+  } catch {
+    return null;
+  }
+}
+
 async function parseError(res: Response): Promise<ApiError> {
   let detail: unknown;
   let message = res.statusText || "Request failed";
   try {
     detail = await res.json();
-    if (
-      detail &&
-      typeof detail === "object" &&
-      "detail" in detail &&
-      (detail as { detail: unknown }).detail != null
-    ) {
-      const d = (detail as { detail: unknown }).detail;
-      message = typeof d === "string" ? d : JSON.stringify(d);
+    if (detail && typeof detail === "object") {
+      if ("error" in detail) {
+        const error = (detail as { error?: unknown }).error;
+        if (error && typeof error === "object" && "message" in error) {
+          const value = (error as { message: unknown }).message;
+          message = typeof value === "string" ? value : JSON.stringify(value);
+        }
+      } else if ("detail" in detail) {
+        const value = (detail as { detail: unknown }).detail;
+        message = typeof value === "string" ? value : JSON.stringify(value);
+      }
     }
   } catch {
     /* ignore */
@@ -36,7 +64,7 @@ async function parseError(res: Response): Promise<ApiError> {
 }
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     ...init,
     headers: {
       Accept: "application/json",
@@ -45,7 +73,10 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) throw await parseError(res);
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 function qs(params: Record<string, string | number | boolean | null | undefined>) {
@@ -72,6 +103,20 @@ export const api = {
   }) =>
     getJson<Exam>("/api/v1/exams", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  updateExam: (
+    id: string,
+    body: {
+      name?: string;
+      description?: string;
+      is_active?: boolean;
+    },
+  ) =>
+    getJson<Exam>(`/api/v1/exams/${id}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
@@ -165,4 +210,49 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  generateQuestionsStream: async function* (
+    body: GenerateQuestionRequest,
+  ): AsyncGenerator<GenerateStreamEvent, void, unknown> {
+    const res = await fetch(apiUrl("/api/v1/questions/generate/stream"), {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (!res.ok) throw await parseError(res);
+    if (!res.body) throw new ApiError(502, "Empty stream response");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const event = parseSseChunk(chunk);
+        if (event) yield event;
+      }
+    }
+    if (buffer.trim()) {
+      const event = parseSseChunk(buffer);
+      if (event) yield event;
+    }
+  },
+
+  deleteQuestion: (id: string) =>
+    getJson<void>(`/api/v1/questions/${id}`, { method: "DELETE" }),
+
+  clearQuestions: (examId?: string) =>
+    getJson<ClearQuestionsResponse>(
+      `/api/v1/questions${qs({ exam_id: examId })}`,
+      { method: "DELETE" },
+    ),
 };

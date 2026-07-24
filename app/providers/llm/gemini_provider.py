@@ -45,11 +45,15 @@ class GeminiLLMProvider(LLMProvider):
         json_mode: bool = False,
         response_schema: type | dict[str, Any] | None = None,
         max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> str:
         config_kwargs: dict[str, Any] = {
-            "temperature": self._temperature,
+            "temperature": temperature if temperature is not None else self._temperature,
             "max_output_tokens": max_output_tokens or self._max_tokens,
         }
+        if seed is not None:
+            config_kwargs["seed"] = seed
         if system:
             config_kwargs["system_instruction"] = system
         if json_mode:
@@ -80,6 +84,8 @@ class GeminiLLMProvider(LLMProvider):
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         if schema_hint:
             prompt = f"{prompt}\n\nExpected JSON schema:\n{json.dumps(schema_hint)}"
@@ -89,6 +95,8 @@ class GeminiLLMProvider(LLMProvider):
             json_mode=True,
             max_output_tokens=max_tokens
             or max(self._max_tokens, _METADATA_MAX_OUTPUT_TOKENS),
+            temperature=temperature,
+            seed=seed,
         )
         try:
             return safe_parse_json(raw)

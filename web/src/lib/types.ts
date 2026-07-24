@@ -129,9 +129,45 @@ export interface GenerateQuestionResponse {
   items: Question[];
 }
 
+export type GenerateStreamEvent =
+  | {
+      event: "started";
+      exam_id: string;
+      topic: string | null;
+      mode: "topic" | "full_syllabus";
+      requested_count: number;
+      context_used: number;
+    }
+  | { event: "slot_started"; index: number; total: number }
+  | {
+      event: "attempt_failed";
+      index: number;
+      attempt: number;
+      error: string;
+      stem?: string;
+    }
+  | { event: "slot_exhausted"; index: number; error: string }
+  | { event: "question"; index: number; item: Question }
+  | {
+      event: "done";
+      exam_id: string;
+      topic: string | null;
+      mode: "topic" | "full_syllabus";
+      requested_count: number;
+      generated_count: number;
+      context_used: number;
+    }
+  | { event: "error"; error: string; code?: string | null };
+
+export interface ClearQuestionsResponse {
+  deleted_count: number;
+  exam_id: string | null;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
+  question_generate_max_count?: number;
 }
 
 export class ApiError extends Error {

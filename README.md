@@ -27,50 +27,148 @@ app/
   utils/
 ```
 
-## Quick start
+## Prerequisites
+
+Install these on the new machine before starting:
+
+| Tool | Version | Notes |
+|------|---------|--------|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose) | latest | Runs Postgres (pgvector) and optional Ollama |
+| [Python](https://www.python.org/downloads/) | **3.12+** | Backend API |
+| [Node.js](https://nodejs.org/) | **20+** (LTS) | Frontend (`web/`); includes `npm` |
+| Git | any | Clone the repo |
+
+Optional:
+
+- **~4 GB free RAM** recommended for local embeddings + Ollama (`llama3.2`)
+- A Gemini API key only if you switch away from the default local stack
+
+## Run on another machine
+
+### 1. Clone the repo
 
 ```bash
-# 1. Start PostgreSQL (pgvector + pg_trgm)
-docker compose up -d
-
-# 2. Install (includes local sentence-transformers embeddings)
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,sentence-transformers]"
-
-# 3. Configure
-cp .env.example .env
-
-# 4. Start Ollama in Docker and pull an LLM (free, local)
-docker compose --profile ollama up -d
-docker compose --profile ollama exec ollama ollama pull llama3.2
-# (Host `ollama` CLI is not required when using the container.)
-
-# 5. Migrate
-alembic upgrade head
-
-# 6. Seed exams
-python -m scripts.seed_exams
-
-# 7. Run API
-uvicorn app.main:app --reload
+git clone <YOUR_REPO_URL> ai-test-platform-scrapper
+cd ai-test-platform-scrapper
 ```
 
-API docs: http://localhost:8000/docs
+### 2. Start PostgreSQL
 
-## Frontend showcase
+```bash
+docker compose up -d
+```
 
-Next.js + Tailwind UI that talks to the API (rewrites `/api/v1/*` → FastAPI):
+This starts **pgvector** Postgres on host port **5433** (user `kushal`, password `0000`, DB `question_bank`). Wait until healthy:
+
+```bash
+docker compose ps
+```
+
+### 3. Install the Python backend
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -U pip
+pip install -e ".[dev,sentence-transformers]"
+```
+
+The first install of `sentence-transformers` downloads the embedding model (`BAAI/bge-small-en-v1.5`) — this can take a few minutes.
+
+### 4. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Defaults match Docker Compose (`DATABASE_URL` → `localhost:5433`). Edit `.env` only if you change DB credentials, ports, or providers.
+
+### 5. Start Ollama (local LLM)
+
+```bash
+docker compose --profile ollama up -d
+docker compose --profile ollama exec ollama ollama pull llama3.2
+```
+
+Ollama listens on `http://localhost:11434`. No host `ollama` CLI install is required when using the container.
+
+To skip the LLM for a quick smoke test, set in `.env`:
+
+```bash
+LLM_PROVIDER=mock
+EMBEDDING_PROVIDER=mock
+```
+
+### 6. Migrate and seed
+
+```bash
+alembic upgrade head
+python -m scripts.seed_exams
+```
+
+### 7. Run the API
+
+```bash
+uvicorn app.main:app --reload
+# or: make run
+```
+
+- API: http://localhost:8000  
+- Swagger docs: http://localhost:8000/docs  
+
+### 8. Run the frontend (optional)
+
+In a **second terminal**:
 
 ```bash
 cd web
-cp .env.local.example .env.local   # optional; defaults to localhost:8000
+cp .env.local.example .env.local   # points at http://localhost:8000
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000 — Overview, Exams, Documents (upload/process/chunks), Search, and Questions (generate + practice).
+Open http://localhost:3000 — Overview, Exams, Documents, Search, and Questions.
 
-Ensure the API is running on `:8000` first. CORS is enabled for `http://localhost:3000`.
+Ensure the API is running on `:8000` first. CORS allows `http://localhost:3000`.
+
+### Ports used
+
+| Service | Port |
+|---------|------|
+| FastAPI | 8000 |
+| Next.js | 3000 |
+| Postgres (Docker) | 5433 → 5432 in container |
+| Ollama (Docker) | 11434 |
+
+### Makefile shortcuts
+
+With the venv activated:
+
+```bash
+make up        # docker compose up -d
+make install   # pip install -e ".[dev]"  (add sentence-transformers separately if needed)
+make migrate
+make seed
+make run
+make test
+make down
+```
+
+### Verify it works
+
+1. Open http://localhost:8000/docs → list exams  
+2. Open http://localhost:3000 → upload a PDF under Documents → Process  
+3. Generate questions once processing finishes  
+
+### Common issues
+
+| Problem | Fix |
+|---------|-----|
+| `connection refused` on DB | `docker compose up -d` and confirm port **5433** is free |
+| Port 5432 already in use | This project uses **5433** on purpose; leave `DATABASE_URL` as in `.env.example` |
+| Ollama / LLM timeouts | Pull `llama3.2`; give the container enough RAM; or use `LLM_PROVIDER=mock` |
+| Embedding install fails | Use Python 3.12+; retry `pip install -e ".[sentence-transformers]"` |
+| Frontend can't reach API | API on `:8000`; check `web/.env.local` and `CORS_ORIGINS` in `.env` |
 
 ## Document pipeline
 
@@ -126,6 +224,7 @@ GEMINI_API_KEY=your-key
 If you change `EMBEDDING_DIMENSION`, update the Alembic vector column (or add a migration) and re-process documents.
 
 Interfaces live under `app/providers/`. Swap implementations without touching services.
+
 ## Task backends
 
 `TASK_BACKEND=in_memory` (default) runs processing via FastAPI `BackgroundTasks`. Replace with Celery/Dramatiq by implementing `TaskDispatcher` — services stay unchanged.
@@ -170,5 +269,6 @@ curl -X POST http://localhost:8000/api/v1/questions/generate \
 ## Tests
 
 ```bash
+source .venv/bin/activate
 pytest -q
 ```

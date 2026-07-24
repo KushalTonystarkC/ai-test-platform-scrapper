@@ -17,6 +17,17 @@ _safe_parse_json = safe_parse_json
 class MockLLMProvider(LLMProvider):
     """Deterministic mock that extracts lightweight heuristics from text."""
 
+    _MOCK_STEMS = [
+        "Which body regulates commercial banks in India?",
+        "What is the primary function of monetary policy?",
+        "Which institution manages India's foreign exchange reserves?",
+        "What does the repo rate influence in the economy?",
+        "Which body regulates the securities market in India?",
+        "What is the main objective of priority sector lending?",
+        "Which act governs banking regulation in India?",
+        "What does CRR stand for in banking terms?",
+    ]
+
     async def generate_json(
         self,
         prompt: str,
@@ -24,21 +35,29 @@ class MockLLMProvider(LLMProvider):
         system: str | None = None,
         schema_hint: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         digest = hashlib.sha256(prompt.encode()).hexdigest()[:12]
-        if schema_hint and "questions" in schema_hint:
+        is_mcq = bool(
+            schema_hint
+            and (
+                "questions" in schema_hint
+                or ("stem" in schema_hint and "options" in schema_hint)
+            )
+        )
+        if is_mcq:
+            # Vary the stem per prompt/seed so mock runs don't produce identical MCQs.
+            selector = seed if seed is not None else int(digest, 16)
+            stem = self._MOCK_STEMS[selector % len(self._MOCK_STEMS)]
             return {
-                "questions": [
-                    {
-                        "stem": "Which body regulates commercial banks in India?",
-                        "options": ["SEBI", "RBI", "IRDAI", "PFRDA"],
-                        "correct_index": 1,
-                        "explanation": "RBI is the banking regulator.",
-                        "subject": "Banking Awareness",
-                        "topic": "RBI",
-                        "difficulty": "easy",
-                    }
-                ]
+                "stem": stem,
+                "options": ["SEBI", "RBI", "IRDAI", "PFRDA"],
+                "correct_index": 1,
+                "explanation": "RBI is the banking regulator.",
+                "subject": "Banking Awareness",
+                "topic": "RBI",
+                "difficulty": "easy",
             }
         return {"mock": True, "digest": digest, "prompt_length": len(prompt)}
 

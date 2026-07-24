@@ -134,7 +134,7 @@ class GenerateQuestionRequest(BaseModel):
     exam_id: uuid.UUID
     # If omitted, sample diverse chunks across the exam (whole syllabus mode)
     topic: str | None = Field(default=None, max_length=512)
-    count: int = Field(default=1, ge=1, le=10)
+    count: int = Field(default=1, ge=1)
     difficulty: DifficultyLiteral | None = None
     document_id: uuid.UUID | None = None
     subject: str | None = Field(default=None, max_length=255)
@@ -146,6 +146,16 @@ class GenerateQuestionRequest(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator("count")
+    @classmethod
+    def count_within_configured_max(cls, value: int) -> int:
+        from app.core.config import get_settings
+
+        max_count = get_settings().question_generate_max_count
+        if value > max_count:
+            raise ValueError(f"count must be <= {max_count}")
+        return value
 
 
 class GeneratedMCQ(BaseModel):

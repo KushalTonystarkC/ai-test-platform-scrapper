@@ -39,12 +39,18 @@ class Settings(BaseSettings):
     llm_provider: str = "ollama"
     llm_model: str = "llama3.2"
     llm_temperature: float = 0.0
+    # Higher temperature for MCQ generation so multi-question runs stay varied.
+    # (Metadata extraction keeps using the deterministic llm_temperature.)
+    llm_question_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     llm_max_tokens: int = 2048
     # HTTP timeout for LLM calls (local CPU models often need 300+)
     llm_timeout_seconds: float = Field(default=300.0, ge=30.0, le=1800.0)
 
     chunk_min_words: int = 500
     chunk_max_words: int = 800
+
+    # Max MCQs allowed in a single POST /questions/generate request
+    question_generate_max_count: int = Field(default=10, ge=1, le=100)
 
     task_backend: str = "in_memory"
 

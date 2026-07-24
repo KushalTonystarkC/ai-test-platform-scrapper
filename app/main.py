@@ -65,8 +65,12 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix=settings.api_prefix)
 
     @app.get("/health", tags=["health"])
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
+    async def health() -> dict[str, str | int]:
+        return {
+            "status": "ok",
+            "version": __version__,
+            "question_generate_max_count": settings.question_generate_max_count,
+        }
 
     return app
 
