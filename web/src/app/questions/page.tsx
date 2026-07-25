@@ -2,7 +2,12 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { Difficulty, Exam, Question } from "@/lib/types";
+import type {
+  Difficulty,
+  Exam,
+  Question,
+  RequestedQuestionType,
+} from "@/lib/types";
 import { ApiError } from "@/lib/types";
 import { difficultyTone, formatDate } from "@/lib/utils";
 import {
@@ -17,18 +22,66 @@ import {
   inputClass,
 } from "@/components/ui";
 
-const LETTERS = ["A", "B", "C", "D"] as const;
+const LETTERS = ["A", "B", "C", "D", "E"] as const;
+
+type QuestionGroup = {
+  key: string;
+  setId: string | null;
+  directions: string;
+  passage: string;
+  items: Question[];
+};
+
+/** Keep list order, but collapse questions sharing a set into one block. */
+function groupQuestions(items: Question[]): QuestionGroup[] {
+  const groups: QuestionGroup[] = [];
+  const bySet = new Map<string, QuestionGroup>();
+
+  for (const question of items) {
+    if (!question.set_id) {
+      groups.push({
+        key: question.id,
+        setId: null,
+        directions: "",
+        passage: "",
+        items: [question],
+      });
+      continue;
+    }
+    const existing = bySet.get(question.set_id);
+    if (existing) {
+      existing.items.push(question);
+      continue;
+    }
+    const group: QuestionGroup = {
+      key: question.set_id,
+      setId: question.set_id,
+      directions: question.directions,
+      passage: question.passage,
+      items: [question],
+    };
+    bySet.set(question.set_id, group);
+    groups.push(group);
+  }
+
+  for (const group of bySet.values()) {
+    group.items.sort((a, b) => a.set_index - b.set_index);
+  }
+  return groups;
+}
 
 function QuestionCard({
   question,
   reveal,
   onDelete,
   deleting,
+  order,
 }: {
   question: Question;
   reveal?: boolean;
   onDelete?: (id: string) => void;
   deleting?: boolean;
+  order?: number;
 }) {
   const [picked, setPicked] = useState<number | null>(null);
   const show = reveal || picked !== null;
@@ -37,6 +90,11 @@ function QuestionCard({
     <article className="rounded-2xl border border-white/8 bg-[#0c1c24]/80 p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap gap-2">
+          {order ? (
+            <Badge className="bg-white/5 font-mono text-stone-300 ring-white/10">
+              Q{order}
+            </Badge>
+          ) : null}
           <Badge className={difficultyTone(question.difficulty)}>
             {question.difficulty}
           </Badge>
@@ -100,6 +158,62 @@ function QuestionCard({
   );
 }
 
+function QuestionGroupBlock({
+  group,
+  onDelete,
+  deletingId,
+}: {
+  group: QuestionGroup;
+  onDelete: (id: string) => void;
+  deletingId: string | null;
+}) {
+  if (!group.setId) {
+    const question = group.items[0];
+    return (
+      <QuestionCard
+        question={question}
+        onDelete={onDelete}
+        deleting={deletingId === question.id}
+      />
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-teal-400/25 bg-teal-500/[0.04] p-4">
+      <header className="mb-4 border-b border-white/8 pb-4">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Badge className="bg-teal-500/15 text-teal-200 ring-teal-400/30">
+            Shared passage set
+          </Badge>
+          <span className="text-xs text-stone-500">
+            {group.items.length} linked question
+            {group.items.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        {group.directions ? (
+          <p className="text-sm font-medium text-stone-300">{group.directions}</p>
+        ) : null}
+        {group.passage ? (
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-stone-400">
+            {group.passage}
+          </p>
+        ) : null}
+      </header>
+      <div className="space-y-4">
+        {group.items.map((question, idx) => (
+          <QuestionCard
+            key={question.id}
+            question={question}
+            order={idx + 1}
+            onDelete={onDelete}
+            deleting={deletingId === question.id}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function QuestionsPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -117,6 +231,8 @@ export default function QuestionsPage() {
   const [count, setCount] = useState(2);
   const [maxCount, setMaxCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty | "">("");
+  const [questionType, setQuestionType] = useState<RequestedQuestionType>("auto");
+  const [setSize, setSetSize] = useState(3);
   const [filterDifficulty, setFilterDifficulty] = useState("");
 
   const load = useCallback(async () => {
@@ -165,10 +281,16 @@ export default function QuestionsPage() {
         topic: topic.trim() || null,
         count,
         difficulty: difficulty || null,
+        question_type: questionType,
+        set_size: setSize,
       })) {
         if (event.event === "started") {
           setStreamProgress(
-            `Starting · mode ${event.mode} · ${event.context_used} context chunks`,
+            `Starting · ${event.question_type} · ${event.option_count ?? 4} options · mode ${event.mode} · ${event.context_used} context chunks`,
+          );
+        } else if (event.event === "set_started") {
+          setStreamProgress(
+            `Building passage set ${event.set_number}/${event.set_total} (${event.size} questions)…`,
           );
         } else if (event.event === "slot_started") {
           setStreamProgress(`Generating question ${event.index}/${event.total}…`);
@@ -185,7 +307,7 @@ export default function QuestionsPage() {
           setStreamProgress(`Received question ${event.index}`);
         } else if (event.event === "done") {
           setInfo(
-            `Generated ${event.generated_count}/${event.requested_count} · mode ${event.mode} · ${event.context_used} context chunks`,
+            `Generated ${event.generated_count}/${event.requested_count} ${event.question_type} question(s) · mode ${event.mode} · ${event.context_used} context chunks`,
           );
           setStreamProgress(null);
         } else if (event.event === "error") {
@@ -244,7 +366,7 @@ export default function QuestionsPage() {
       <PageHeader
         eyebrow="Question bank"
         title="Generate & practice MCQs"
-        description="Pull hybrid context from processed documents and ask the LLM for IBPS-style multiple-choice questions. Leave topic blank for full-syllabus sampling."
+        description="Pull hybrid context from processed documents and ask the LLM for exam-style multiple-choice questions. Leave topic blank for full-syllabus sampling. Auto format detects shared-passage sets when the source looks like comprehension material."
       />
 
       {error ? (
@@ -322,6 +444,46 @@ export default function QuestionsPage() {
                 </select>
               </Field>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field
+                label="Format"
+                  hint="Auto detects shared-passage material; other exams may use standalone only"
+                >
+                  <select
+                    className={inputClass}
+                    value={questionType}
+                    onChange={(e) =>
+                      setQuestionType(e.target.value as RequestedQuestionType)
+                    }
+                  >
+                    <option value="auto">Auto (match source)</option>
+                    <option value="standalone">Standalone</option>
+                    <option value="comprehension">Shared passage set</option>
+                  </select>
+              </Field>
+              <Field
+                label="Questions per set"
+                hint={
+                  questionType === "standalone"
+                    ? "Comprehension only"
+                    : "Shared passage size"
+                }
+              >
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={2}
+                  max={5}
+                  value={setSize}
+                  disabled={questionType === "standalone"}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setSetSize(Math.min(Math.max(2, next), 5));
+                  }}
+                />
+              </Field>
+            </div>
             <Button type="submit" disabled={generating || !examId}>
               {generating
                 ? streamProgress || "Generating… (streaming)"
@@ -369,12 +531,12 @@ export default function QuestionsPage() {
             ) : null}
             {!loading && questions.length > 0 ? (
               <div className="max-h-[36rem] space-y-4 overflow-y-auto pr-1">
-                {questions.map((q) => (
-                  <QuestionCard
-                    key={q.id}
-                    question={q}
+                {groupQuestions(questions).map((group) => (
+                  <QuestionGroupBlock
+                    key={group.key}
+                    group={group}
                     onDelete={(id) => void onDeleteOne(id)}
-                    deleting={deletingId === q.id}
+                    deletingId={deletingId}
                   />
                 ))}
               </div>

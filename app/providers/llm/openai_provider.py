@@ -209,6 +209,7 @@ class OpenAILLMProvider(LLMProvider):
             f"{context}\n\nText chunk:\n{clipped}" if context else f"Text chunk:\n{clipped}"
         )
 
+        fallback_summary = (clipped[:240] + "…") if len(clipped) > 240 else clipped
         try:
             data = await self.generate_json(
                 user_prompt,
@@ -218,7 +219,11 @@ class OpenAILLMProvider(LLMProvider):
             )
             if source_type and not data.get("sourceType"):
                 data["sourceType"] = source_type
-            return ChunkMetadata.model_validate(data)
+            meta = ChunkMetadata.model_validate(data)
+            # Tiny models often return empty or parroted summaries — use extractive text.
+            if not (meta.summary or "").strip():
+                meta.summary = fallback_summary
+            return meta
         except Exception as exc:
             logger.warning(
                 "llm_metadata_fallback",
@@ -227,7 +232,7 @@ class OpenAILLMProvider(LLMProvider):
             )
             # Soft-fail: keep ingestion moving when local LLM is too slow
             return ChunkMetadata(
-                summary=(clipped[:240] + "…") if len(clipped) > 240 else clipped,
+                summary=fallback_summary,
                 sourceType=source_type or "",
                 difficultyHint="unknown",
             )

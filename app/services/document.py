@@ -240,7 +240,9 @@ class DocumentService:
 
         except Exception as exc:
             logger.exception("document_processing_failed", document_id=str(document_id))
-            # Re-fetch in case session state is dirty
+            # Integrity / flush errors leave the session needing a rollback before
+            # we can persist FAILED status.
+            await self.session.rollback()
             document = await self.get(document_id)
             await self.documents.update_status(
                 document,

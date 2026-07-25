@@ -11,54 +11,58 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 DifficultyLiteral = Literal["easy", "medium", "hard"]
+QuestionTypeLiteral = Literal["standalone", "comprehension"]
+
+# Many exams use 4 choices; some (e.g. banking) use 5 with "None of these".
+# Schema accepts both; generation picks a count from the source material.
+MIN_OPTIONS = 4
+MAX_OPTIONS = 5
+OPTION_LETTERS = ("A", "B", "C", "D", "E")
+_LETTER_MAP = {letter: i for i, letter in enumerate(OPTION_LETTERS)}
 
 
 def normalize_mcq_options(value: Any) -> list[str]:
-    """Coerce messy LLM option payloads into exactly 4 choice strings."""
+    """Coerce messy LLM option payloads into 4 or 5 choice strings."""
     if value is None:
         raise ValueError("options is required")
 
     if isinstance(value, str):
         text = value.strip()
-        # A) ... B) ... C) ... D) ...
+        # A) ... B) ... C) ... D) ... E) ...
         labeled = re.findall(
-            r"(?:^|\s)(?:[A-Da-d][\)\.]|\([A-Da-d]\))\s*(.+?)(?=(?:\s(?:[A-Da-d][\)\.]|\([A-Da-d]\)))|$)",
+            r"(?:^|\s)(?:[A-Ea-e][\)\.]|\([A-Ea-e]\))\s*(.+?)(?=(?:\s(?:[A-Ea-e][\)\.]|\([A-Ea-e]\)))|$)",
             text,
             flags=re.DOTALL,
         )
-        if len(labeled) >= 4:
-            return [p.strip() for p in labeled[:4]]
+        if len(labeled) >= MIN_OPTIONS:
+            return [p.strip() for p in labeled[:MAX_OPTIONS]]
         parts = [p.strip() for p in re.split(r"[\n|;]+", text) if p.strip()]
-        if len(parts) >= 4:
-            return parts[:4]
-        raise ValueError("could not parse options string into 4 choices")
+        if len(parts) >= MIN_OPTIONS:
+            return parts[:MAX_OPTIONS]
+        raise ValueError("could not parse options string into 4 or 5 choices")
 
     if not isinstance(value, list):
         raise ValueError("options must be a list or string")
 
     cleaned = [str(v).strip() for v in value if str(v).strip()]
-    if len(cleaned) == 4:
+    if MIN_OPTIONS <= len(cleaned) <= MAX_OPTIONS:
         return cleaned
 
     # Prefer phrase-like choices (models sometimes emit word tokens)
     phrases = [o for o in cleaned if len(o.split()) >= 2 or len(o) >= 12]
-    if len(phrases) >= 4:
-        return phrases[:4]
+    if len(phrases) >= MIN_OPTIONS:
+        return phrases[:MAX_OPTIONS] if len(phrases) == MAX_OPTIONS else phrases[:MIN_OPTIONS]
 
-    if len(cleaned) > 4:
+    if len(cleaned) > MAX_OPTIONS:
         # Pack word tokens into 4 roughly equal groups
-        groups: list[list[str]] = [[] for _ in range(4)]
+        groups: list[list[str]] = [[] for _ in range(MIN_OPTIONS)]
         for i, token in enumerate(cleaned):
-            groups[i % 4].append(token)
+            groups[i % MIN_OPTIONS].append(token)
         packed = [" ".join(g).strip() for g in groups]
         if all(packed):
             return packed
 
-    if 1 <= len(cleaned) < 4:
-        # Pad with placeholders so validation can still fail clearly upstream if needed
-        raise ValueError(f"options must have 4 items, got {len(cleaned)}")
-
-    raise ValueError(f"options must have 4 items, got {len(cleaned)}")
+    raise ValueError(f"options must have 4 or 5 items, got {len(cleaned)}")
 
 
 def normalize_mcq_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -84,7 +88,17 @@ def normalize_mcq_item(item: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _option_count(data: dict[str, Any]) -> int:
+    options = data.get("options")
+    if isinstance(options, list):
+        count = len([o for o in options if str(o).strip()])
+        if MIN_OPTIONS <= count <= MAX_OPTIONS:
+            return count
+    return MIN_OPTIONS
+
+
 def _resolve_correct_index(data: dict[str, Any]) -> int | None:
+    count = _option_count(data)
     for key in (
         "correct_index",
         "correctIndex",
@@ -103,27 +117,26 @@ def _resolve_correct_index(data: dict[str, Any]) -> int | None:
         if isinstance(value, bool):
             continue
         if isinstance(value, int):
-            if 0 <= value <= 3:
+            if 0 <= value < count:
                 return value
-            if 1 <= value <= 4:  # 1-based
+            if 1 <= value <= count:  # 1-based
                 return value - 1
             continue
         text = str(value).strip()
-        letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
         upper = text.upper()
-        if upper in letter_map:
-            return letter_map[upper]
+        if upper in _LETTER_MAP and _LETTER_MAP[upper] < count:
+            return _LETTER_MAP[upper]
         # Match against option text
         options = data.get("options")
         if isinstance(options, list):
-            for i, opt in enumerate(options[:4]):
+            for i, opt in enumerate(options[:count]):
                 if str(opt).strip().lower() == text.lower():
                     return i
         try:
             num = int(text)
-            if 0 <= num <= 3:
+            if 0 <= num < count:
                 return num
-            if 1 <= num <= 4:
+            if 1 <= num <= count:
                 return num - 1
         except ValueError:
             pass
@@ -138,6 +151,10 @@ class GenerateQuestionRequest(BaseModel):
     difficulty: DifficultyLiteral | None = None
     document_id: uuid.UUID | None = None
     subject: str | None = Field(default=None, max_length=255)
+    # "auto" infers comprehension when the source chunks are passage / directions based.
+    question_type: Literal["auto", "standalone", "comprehension"] = "auto"
+    # Questions per shared-stimulus set (comprehension only).
+    set_size: int = Field(default=3, ge=2, le=5)
 
     @field_validator("topic", mode="before")
     @classmethod
@@ -162,8 +179,8 @@ class GeneratedMCQ(BaseModel):
     """Single LLM-produced MCQ before / after validation."""
 
     stem: str = Field(..., min_length=1)
-    options: list[str] = Field(..., min_length=4, max_length=4)
-    correct_index: int = Field(default=0, ge=0, le=3)
+    options: list[str] = Field(..., min_length=MIN_OPTIONS, max_length=MAX_OPTIONS)
+    correct_index: int = Field(default=0, ge=0, le=MAX_OPTIONS - 1)
     explanation: str = ""
     subject: str = ""
     topic: str = ""
@@ -180,8 +197,8 @@ class GeneratedMCQ(BaseModel):
     @classmethod
     def options_nonempty(cls, value: Any) -> list[str]:
         cleaned = normalize_mcq_options(value)
-        if len(cleaned) != 4 or any(not o for o in cleaned):
-            raise ValueError("options must be exactly 4 non-empty strings")
+        if not (MIN_OPTIONS <= len(cleaned) <= MAX_OPTIONS) or any(not o for o in cleaned):
+            raise ValueError("options must be 4 or 5 non-empty strings")
         return cleaned
 
     @field_validator("correct_index", mode="before")
@@ -191,13 +208,12 @@ class GeneratedMCQ(BaseModel):
             return 0
         if isinstance(value, str):
             text = value.strip().upper()
-            letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
-            if text in letter_map:
-                return letter_map[text]
+            if text in _LETTER_MAP:
+                return _LETTER_MAP[text]
             value = int(text)
         idx = int(value)
-        if idx < 0 or idx > 3:
-            raise ValueError("correct_index must be 0..3")
+        if idx < 0 or idx >= MAX_OPTIONS:
+            raise ValueError(f"correct_index must be 0..{MAX_OPTIONS - 1}")
         return idx
 
     @field_validator("difficulty", mode="before")
@@ -210,6 +226,32 @@ class GeneratedMCQ(BaseModel):
             return "medium"
         return text
 
+    @model_validator(mode="after")
+    def correct_index_within_options(self) -> GeneratedMCQ:
+        if self.correct_index >= len(self.options):
+            raise ValueError(
+                f"correct_index {self.correct_index} is out of range "
+                f"for {len(self.options)} options"
+            )
+        return self
+
+
+class GeneratedQuestionSet(BaseModel):
+    """A shared-stimulus (comprehension) set: directions + passage + linked MCQs."""
+
+    directions: str = ""
+    passage: str = Field(..., min_length=1)
+    questions: list[GeneratedMCQ] = Field(..., min_length=1)
+
+    @field_validator("directions", "passage", mode="before")
+    @classmethod
+    def coerce_text(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return "\n".join(str(v).strip() for v in value if str(v).strip())
+        return str(value).strip()
+
 
 class QuestionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -217,6 +259,11 @@ class QuestionRead(BaseModel):
     id: uuid.UUID
     exam_id: uuid.UUID
     subject_id: uuid.UUID | None = None
+    question_type: QuestionTypeLiteral = "standalone"
+    set_id: uuid.UUID | None = None
+    set_index: int = 0
+    directions: str = ""
+    passage: str = ""
     stem: str
     options: list[str]
     correct_index: int
@@ -228,6 +275,12 @@ class QuestionRead(BaseModel):
     document_id: uuid.UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+    @field_validator("question_type", mode="before")
+    @classmethod
+    def coerce_question_type(cls, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        return text if text in {"standalone", "comprehension"} else "standalone"
 
     @field_validator("source_chunk_ids", mode="before")
     @classmethod
@@ -251,6 +304,11 @@ class QuestionRead(BaseModel):
                 "id": obj.id,
                 "exam_id": obj.exam_id,
                 "subject_id": obj.subject_id,
+                "question_type": getattr(obj, "question_type", "standalone"),
+                "set_id": getattr(obj, "set_id", None),
+                "set_index": getattr(obj, "set_index", 0) or 0,
+                "directions": getattr(obj, "directions", "") or "",
+                "passage": getattr(obj, "passage", "") or "",
                 "stem": obj.stem,
                 "options": obj.options,
                 "correct_index": obj.correct_index,
@@ -271,6 +329,7 @@ class GenerateQuestionResponse(BaseModel):
     exam_id: uuid.UUID
     topic: str | None = None
     mode: Literal["topic", "full_syllabus"]
+    question_type: QuestionTypeLiteral = "standalone"
     requested_count: int
     generated_count: int
     context_used: int

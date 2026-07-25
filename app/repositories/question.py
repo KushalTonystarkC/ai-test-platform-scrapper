@@ -78,3 +78,26 @@ class QuestionRepository:
         total = int((await self.session.execute(count_stmt)).scalar_one())
         rows = list((await self.session.execute(list_stmt)).scalars().all())
         return rows, total
+
+    async def list_stems(
+        self,
+        *,
+        exam_id: uuid.UUID,
+        document_id: uuid.UUID | None = None,
+        topic: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """Return existing question stems for duplicate checks during generation."""
+        filters = [Question.exam_id == exam_id]
+        if document_id is not None:
+            filters.append(Question.document_id == document_id)
+        if topic:
+            filters.append(Question.topic.ilike(f"%{topic}%"))
+
+        stmt = (
+            select(Question.stem)
+            .where(*filters)
+            .order_by(Question.created_at.desc())
+            .limit(limit)
+        )
+        return [str(stem) for stem in (await self.session.execute(stmt)).scalars().all()]

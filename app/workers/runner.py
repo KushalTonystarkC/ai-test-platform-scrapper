@@ -31,6 +31,8 @@ async def run_document_processing(document_id: uuid.UUID) -> None:
                 "worker_document_processing_failed",
                 document_id=str(document_id),
             )
+            # process_document should already have rolled back + written FAILED;
+            # commit that status if present, otherwise clear the broken txn.
             try:
                 await session.commit()
             except Exception:

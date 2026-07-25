@@ -90,6 +90,11 @@ export interface Question {
   id: string;
   exam_id: string;
   subject_id: string | null;
+  question_type: QuestionType;
+  set_id: string | null;
+  set_index: number;
+  directions: string;
+  passage: string;
   stem: string;
   options: string[];
   correct_index: number;
@@ -110,6 +115,9 @@ export interface QuestionListResponse {
   offset: number;
 }
 
+export type QuestionType = "standalone" | "comprehension";
+export type RequestedQuestionType = "auto" | QuestionType;
+
 export interface GenerateQuestionRequest {
   exam_id: string;
   topic?: string | null;
@@ -117,12 +125,15 @@ export interface GenerateQuestionRequest {
   difficulty?: Difficulty | null;
   document_id?: string | null;
   subject?: string | null;
+  question_type?: RequestedQuestionType;
+  set_size?: number;
 }
 
 export interface GenerateQuestionResponse {
   exam_id: string;
   topic: string | null;
   mode: "topic" | "full_syllabus";
+  question_type: QuestionType;
   requested_count: number;
   generated_count: number;
   context_used: number;
@@ -135,10 +146,33 @@ export type GenerateStreamEvent =
       exam_id: string;
       topic: string | null;
       mode: "topic" | "full_syllabus";
+      question_type: QuestionType;
+      option_count?: number;
       requested_count: number;
+      set_count: number;
       context_used: number;
     }
-  | { event: "slot_started"; index: number; total: number }
+  | {
+      event: "slot_started";
+      index: number;
+      total: number;
+      question_type: QuestionType;
+      batch_size: number;
+    }
+  | {
+      event: "set_started";
+      set_number: number;
+      set_total: number;
+      size: number;
+    }
+  | {
+      event: "set_ready";
+      set_number: number;
+      set_id: string;
+      directions: string;
+      passage: string;
+      question_count: number;
+    }
   | {
       event: "attempt_failed";
       index: number;
@@ -153,6 +187,7 @@ export type GenerateStreamEvent =
       exam_id: string;
       topic: string | null;
       mode: "topic" | "full_syllabus";
+      question_type: QuestionType;
       requested_count: number;
       generated_count: number;
       context_used: number;

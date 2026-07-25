@@ -38,12 +38,13 @@ async def generate_questions(
     service: QuestionServiceDep,
     session: DbSession,
 ) -> GenerateQuestionResponse:
-    items, context_used, mode = await service.generate(payload)
+    items, context_used, mode, question_type = await service.generate(payload)
     await session.commit()
     return GenerateQuestionResponse(
         exam_id=payload.exam_id,
         topic=payload.topic,
         mode=mode,
+        question_type=question_type,
         requested_count=payload.count,
         generated_count=len(items),
         context_used=context_used,

@@ -17,7 +17,11 @@ if TYPE_CHECKING:
 
 
 class Question(Base):
-    """Persisted IBPS-style multiple-choice question (4 options, single correct)."""
+    """Persisted multiple-choice question (4-5 options, single correct).
+
+    Comprehension questions share a stimulus: rows with the same ``set_id`` belong to
+    one set and repeat the same ``directions`` / ``passage``, ordered by ``set_index``.
+    """
 
     __tablename__ = "questions"
 
@@ -30,6 +34,15 @@ class Question(Base):
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True
     )
+    question_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="standalone", index=True
+    )
+    set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    set_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    directions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    passage: Mapped[str] = mapped_column(Text, nullable=False, default="")
     stem: Mapped[str] = mapped_column(Text, nullable=False)
     options: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     correct_index: Mapped[int] = mapped_column(Integer, nullable=False)

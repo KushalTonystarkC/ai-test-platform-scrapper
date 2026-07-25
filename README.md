@@ -266,6 +266,21 @@ curl -X POST http://localhost:8000/api/v1/questions/generate \
 
 `count` defaults to **1** (max **10**). Response includes `requested_count` and `generated_count`.
 
+**Comprehension mode** (one shared passage / directions block per set of linked questions):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/questions/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"exam_id":"<EXAM_UUID>","count":6,"question_type":"comprehension","set_size":3}'
+```
+
+`question_type` is `auto` (default), `standalone`, or `comprehension`. `auto` picks
+comprehension when the source chunks read like directions / passage / caselet material.
+Questions in a set share `set_id`, `directions`, and `passage`, ordered by `set_index`.
+Option count is inferred from the source (default **4**; **5** only when the corpus
+clearly uses a fifth choice such as "None of these"). Other exams are not forced into
+a banking-paper template.
+
 ## Tests
 
 ```bash
